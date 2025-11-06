@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cyber Threat Portal</title>
+    <style>
+      :root{
+        --bg:#0a0a0a;
+        --panel:#0e0e0f;
+        --panel-2:#121214;
+        --stroke:#1a1b1e;
+        --text:#cfe9d0;            /* soft green */
+        --muted:#7ea385;           /* muted green */
+        --neon:#39ff14;            /* subtle neon green */
+        --neon-dim:#22cc0f;
+        --danger:#ff6b6b;
+        --warn:#ffe08a;
+        --ok:#7CFC9A;
+        --focus:0 0 0 2px rgba(57,255,20,.35), 0 0 18px rgba(57,255,20,.18);
+        --shadow:0 10px 30px rgba(0,0,0,.35);
+      }
+
+      *{ box-sizing: border-box; }
+      html, body { height:100%; }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", sans-serif;
+        margin: 0; background: var(--bg); color: var(--text);
+      }
+
+      header {
+        padding: 16px 24px; background: #0b0b0c; border-bottom: 1px solid var(--stroke);
+        display:flex; align-items:center; gap:16px;
+      }
+      header .brand {
+        font-weight:700; letter-spacing:.4px; color: var(--neon);
+        text-shadow: 0 0 12px rgba(57,255,20,.25);
+      }
+      a { color: var(--muted); text-decoration: none; }
+      a:hover { color: var(--neon); }
+
+      .container { max-width: 1040px; margin: 24px auto; padding: 0 16px; }
+
+      .card {
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 1px solid var(--stroke);
+        border-radius: 14px; padding: 16px; box-shadow: var(--shadow);
+      }
+
+      input, textarea, select {
+        width: 100%; padding: 12px 12px; margin: 6px 0 14px;
+        border-radius: 10px; border: 1px solid var(--stroke);
+        background:#0a0a0b; color: var(--text);
+        transition: box-shadow .15s ease, border-color .15s ease, background .15s ease;
+      }
+      input::placeholder, textarea::placeholder { color: #6a6f70; }
+      input:focus, textarea:focus, select:focus {
+        outline: none; border-color: var(--neon-dim); box-shadow: var(--focus);
+        background:#0c0c0d;
+      }
+
+      button {
+        padding: 10px 16px; border: 1px solid var(--neon-dim);
+        border-radius: 10px; background: var(--neon); color: #000; cursor: pointer;
+        font-weight: 600; transition: transform .06s ease, box-shadow .15s ease, opacity .15s ease;
+        box-shadow: 0 0 0 1px rgba(57,255,20,.2), 0 8px 18px rgba(57,255,20,.12);
+      }
+      button:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px rgba(57,255,20,.3), 0 12px 26px rgba(57,255,20,.18); }
+      button:active { transform: translateY(0); }
+      button.secondary {
+        background: transparent; color: var(--text);
+        border-color: #335033;
+      }
+      button.ghost {
+        background: transparent; border-color: var(--stroke); color: var(--muted);
+      }
+      button:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 10px; border-bottom: 1px solid var(--stroke); text-align: left; }
+      thead th {
+        background: #0c0f0d; color: var(--muted); font-weight: 600;
+        border-bottom: 1px solid #1d211d;
+      }
+      tbody tr:hover { background: rgba(57,255,20,.03); }
+
+      .badge {
+        padding: 4px 10px; border-radius: 999px; font-size: 12px;
+        background: #101512; border: 1px solid #244f2a; color: var(--muted);
+      }
+      .badge.warn { border-color:#5a4c1e; background:#131108; color:#ffe08a; }
+      .badge.ok { border-color:#2b6a3a; background:#0e1511; color:#92f7a4; }
+      .badge.danger { border-color:#5a2222; background:#140d0d; color:#ff9c9c; }
+
+      .row { display:flex; gap:12px; flex-wrap: wrap; }
+      .row > * { flex:1 1 240px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">R-Bug Intel</div>
+      <!-- intentionally NO admin link here; admin is at /admin when typed manually -->
+    </header>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
