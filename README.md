@@ -77,5 +77,15 @@ SELECT * FROM v_open_reports;
 
 SELECT * FROM v_hotspots_by_location_and_type;
 
+Priority Calculation:
+
+1. Each report is given a base priority value.
+2. Priority is raised for reports from the same phone number within the previous 30 days.
+3. The priority rises even more if numerous reports from the same location and threat type have been received in the previous seven days. 4. The priority rises significantly if the phone number is on the blacklist.
+5. The report is automatically marked as "UNDER_PROCESS" if a number is blacklisted or repeated excessively.
+priority = 10
+         + (5 × duplicate phone count in last 30 days)
+         + (3 × hotspot count for same location + type in last 7 days)
+         + 20 if phone is in blacklist
 
 
