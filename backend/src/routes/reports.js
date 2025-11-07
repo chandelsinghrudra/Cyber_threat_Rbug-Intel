@@ -1,61 +1,9 @@
 import express from "express";
-import { pool } from "../db.js";  // ✅ FIXED — matches your index.js
+import { pool } from "../db.js";
+import { io } from "../index.js";
 
 const router = express.Router();
 
-// ------------------------------
-// LIST REPORTS (with description)
-// ------------------------------
-router.get("/", async (req, res) => {
-  try {
-    const { status = "", search = "" } = req.query;
-
-    let where = `WHERE 1=1`;
-    let params = [];
-
-    if (status) {
-      where += ` AND rs.code = ?`;
-      params.push(status);
-    }
-
-    if (search) {
-      where += ` AND (r.reporter_name LIKE ? OR r.phone LIKE ? OR r.location LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
-    }
-
-    const [rows] = await pool.query(
-      `
-      SELECT 
-        r.id,
-        r.reporter_name,
-        r.phone,
-        r.location,
-        r.description,      -- ✅ description included
-        r.priority,
-        r.type_id,
-        r.created_at,
-        r.version,
-        tt.name AS threat_type,
-        rs.code AS status_code
-      FROM reports r
-      JOIN threat_types tt ON r.type_id = tt.id
-      JOIN report_statuses rs ON r.status_id = rs.id
-      ${where}
-      ORDER BY r.created_at DESC
-      `,
-      params
-    );
-
-    res.json({ ok: true, reports: rows });
-  } catch (err) {
-    console.error("LIST ERROR:", err);
-    res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-// ------------------------------
-// CREATE REPORT
-// ------------------------------
 router.post("/", async (req, res) => {
   try {
     const { name, phone, location, type_id, description } = req.body;
@@ -66,122 +14,187 @@ router.post("/", async (req, res) => {
       [name, phone, location, type_id, description]
     );
 
-    const [rows] = await pool.query(
-      `
-      SELECT 
-        r.*,
-        tt.name AS threat_type,
-        rs.code AS status_code
-      FROM reports r
-      JOIN threat_types tt ON r.type_id = tt.id
-      JOIN report_statuses rs ON r.status_id = rs.id
-      WHERE r.id = ?
-      `,
-      [result.insertId]
+    const insertId = result.insertId;
+
+    const [[newReport]] = await pool.query(
+      `SELECT r.*, tt.name AS threat_type, rs.code AS status_code
+       FROM reports r
+       JOIN threat_types tt ON r.type_id = tt.id
+       JOIN report_statuses rs ON r.status_id = rs.id
+       WHERE r.id = ?`,
+      [insertId]
     );
 
-    res.json({ ok: true, report: rows[0] });
+    io.emit("report:new", newReport);
+
+    res.json({ ok: true, report: newReport });
   } catch (err) {
-    console.error("CREATE ERROR:", err);
-    res.status(500).json({ ok: false, error: "Server error" });
+    console.error("INSERT ERROR:", err);
+    res.json({ ok: false, error: "Failed to submit report" });
   }
 });
 
-// ------------------------------
-// UPDATE STATUS
-// ------------------------------
-router.post("/:id/status", async (req, res) => {
+/* -------------------------------------------
+   LIST: All Reports (with filters)
+--------------------------------------------*/
+router.get("/", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { new_status, version } = req.body;
+    const { status, search } = req.query;
 
-    const [[row]] = await pool.query(
-      "SELECT version FROM reports WHERE id = ?",
-      [id]
-    );
-
-    if (!row) return res.json({ ok: false, error: "Not found" });
-
-    if (row.version !== version)
-      return res.json({ ok: false, error: "Version mismatch (concurrency conflict)" });
-
-    await pool.query(
-      `
-      UPDATE reports
-      SET status_id = (SELECT id FROM report_statuses WHERE code = ?),
-          version = version + 1
-      WHERE id = ?
-      `,
-      [new_status, id]
-    );
-
-    const [[updated]] = await pool.query(
-      `
-      SELECT 
-        r.*, 
-        tt.name AS threat_type,
-        rs.code AS status_code
+    let sql = `
+      SELECT r.*, tt.name AS threat_type, rs.code AS status_code
       FROM reports r
       JOIN threat_types tt ON r.type_id = tt.id
       JOIN report_statuses rs ON r.status_id = rs.id
-      WHERE r.id = ?
-      `,
-      [id]
-    );
+      WHERE 1
+    `;
 
-    res.json({ ok: true, report: updated });
+    const params = [];
+
+    if (status) {
+      sql += ` AND rs.code = ? `;
+      params.push(status);
+    }
+
+    if (search) {
+      sql += ` AND (
+        r.reporter_name LIKE ? OR 
+        r.phone LIKE ? OR
+        r.location LIKE ?
+      ) `;
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    sql += ` ORDER BY r.created_at DESC `;
+
+    const [rows] = await pool.query(sql, params);
+
+    res.json({ ok: true, reports: rows });
   } catch (err) {
-    console.error("STATUS ERROR:", err);
-    res.status(500).json({ ok: false, error: "Server error" });
+    console.error("LIST ERROR:", err);
+    res.json({ ok: false, error: "Failed to fetch reports" });
   }
 });
 
-// ------------------------------
-// RESOLVE REPORT
-// ------------------------------
-router.post("/:id/resolve", async (req, res) => {
+
+router.patch("/:id/status", async (req, res) => {
+  const id = req.params.id;
+  const { new_status, version } = req.body;
+
+  const conn = await pool.getConnection();
+
   try {
-    const { id } = req.params;
-    const { version } = req.body;
+    await conn.beginTransaction();
 
-    const [[row]] = await pool.query(
-      "SELECT version FROM reports WHERE id = ?",
+    const [rows] = await conn.query(
+      "SELECT version FROM reports WHERE id = ? FOR UPDATE",
       [id]
     );
 
-    if (!row) return res.json({ ok: false, error: "Not found" });
-    if (row.version !== version)
-      return res.json({ ok: false, error: "Version mismatch (concurrency conflict)" });
+    if (rows.length === 0) {
+      throw new Error("Report not found");
+    }
 
-    await pool.query(
-      `
-      UPDATE reports
-      SET status_id = (SELECT id FROM report_statuses WHERE code = 'RESOLVED'),
-          version = version + 1
-      WHERE id = ?
-      `,
+    const currentVersion = rows[0].version;
+
+    if (currentVersion !== version) {
+      await conn.rollback();
+      return res.json({ ok: false, error: "Version mismatch" });
+    }
+
+    const newVersion = version + 1;
+
+    await conn.query(
+      `UPDATE reports 
+       SET status_id = (SELECT id FROM report_statuses WHERE code = ?),
+           version = ?
+       WHERE id = ?`,
+      [new_status, newVersion, id]
+    );
+
+    const [[updated]] = await conn.query(
+      `SELECT r.*, tt.name AS threat_type, rs.code AS status_code
+       FROM reports r
+       JOIN threat_types tt ON r.type_id = tt.id
+       JOIN report_statuses rs ON r.status_id = rs.id
+       WHERE r.id = ?`,
       [id]
     );
 
-    const [[updated]] = await pool.query(
-      `
-      SELECT 
-        r.*, 
-        tt.name AS threat_type,
-        rs.code AS status_code
-      FROM reports r
-      JOIN threat_types tt ON r.type_id = tt.id
-      JOIN report_statuses rs ON r.status_id = rs.id
-      WHERE r.id = ?
-      `,
-      [id]
-    );
+    await conn.commit();
+
+    io.emit("report:updated", updated);
 
     res.json({ ok: true, report: updated });
+  } catch (err) {
+    console.error("UPDATE ERROR:", err);
+    await conn.rollback();
+    res.json({ ok: false, error: "Failed to update status" });
+  } finally {
+    conn.release();
+  }
+});
+
+
+router.patch("/:id/resolve", async (req, res) => {
+  const id = req.params.id;
+  const { version } = req.body;
+
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query(
+      "SELECT version FROM reports WHERE id = ? FOR UPDATE",
+      [id]
+    );
+
+    if (rows.length === 0) {
+      throw new Error("Report not found");
+    }
+
+    const currentVersion = rows[0].version;
+
+ 
+    if (currentVersion !== version) {
+      await conn.rollback();
+      return res.json({ ok: false, error: "Version mismatch" });
+    }
+
+    const newVersion = version + 1;
+
+    await conn.query(
+      `UPDATE reports 
+       SET status_id = (SELECT id FROM report_statuses WHERE code = 'RESOLVED'),
+           version = ?
+       WHERE id = ?`,
+      [newVersion, id]
+    );
+
+    const [[updated]] = await conn.query(
+      `SELECT r.*, tt.name AS threat_type, rs.code AS status_code
+       FROM reports r
+       JOIN threat_types tt ON r.type_id = tt.id
+       JOIN report_statuses rs ON r.status_id = rs.id
+       WHERE r.id = ?`,
+      [id]
+    );
+
+    await conn.commit();
+
+    io.emit("report:updated", updated);
+
+    res.json({ ok: true, report: updated });
+
   } catch (err) {
     console.error("RESOLVE ERROR:", err);
-    res.status(500).json({ ok: false, error: "Server error" });
+    await conn.rollback();
+    res.json({ ok: false, error: "Failed to resolve report" });
+  } finally {
+    conn.release();
   }
 });
+
 
 export default router;
